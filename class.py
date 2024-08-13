@@ -18,17 +18,8 @@ from landlab.plot.drainage_plot import drainage_plot
 from libpysal.weights import lat2W
 from esda.moran import Moran
 from esda.geary import Geary
-import math
 
-# Functions to add    
-# def plot_morans_i_over_time(matrices, time_steps):
-# def plot_gearys_c_over_time(matrices, time_steps):
-
-
-
-
-#%% Class
-
+#%% Classes
 class Shannon_Entropy:
     def __init__(self, grid, matrices, k = None, pixel = None, pixel_stream = None, 
                  pixel_hillslope = None, stream_threshold = 4, slope_threshold = 0.1, 

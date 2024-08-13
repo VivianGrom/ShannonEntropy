@@ -20,11 +20,7 @@ from esda.moran import Moran
 from esda.geary import Geary
 import math
 
-# Functions to add
-# def pixel_entropy_across_experiments_mask(grid, matrices, mask, pixel_stream=None, pixel_hillslope=None):
-# def calculate_shannon_entropy_mask(grid, matrices, stream_mask, k_stream=None, k_hillslope=None):
-
-    
+# Functions to add    
 # def plot_morans_i_over_time(matrices, time_steps):
 # def plot_gearys_c_over_time(matrices, time_steps):
 

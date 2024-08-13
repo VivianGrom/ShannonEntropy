@@ -615,6 +615,124 @@ class Shannon_Entropy:
         
         
         return entropies_stream_array, entropies_hillslope_array
+    
+class Spatial_Autocorrelation:
+    def __init__(self, grid, matrices, time_steps):
+    
+        self.grid = grid
+        self.matrices = matrices
+        self.time_steps = time_steps
+        
+    def plot_morans_i_over_time(self):
+        """
+        Calculates and plots Moran's I and p-values over multiple time steps.
+
+        Parameters:
+        - matrices: list of 2D numpy arrays representing different time steps.
+        - time_steps: list of integers representing the time steps.
+        """
+        # Create the matrix of weights 
+        w = lat2W(self.matrices[0].shape[0], self.matrices[0].shape[1])
+
+        # Calculate Moran's I and p-values for each matrix
+        moran_values = []
+        p_values = []
+        for matrix in self.matrices:
+            mi = Moran(matrix, w)
+            moran_values.append(mi.I)
+            p_values.append(mi.p_norm)
+
+        # Display Moran's I values and p-values
+        for i, (mi_val, p_val) in enumerate(zip(moran_values, p_values)):
+            print(f"Time Step {i+1} - Moran's I: {mi_val:.4f}, p-value: {p_val:.4f}")
+        
+        # Plot Moran's I vs. Time Steps
+        fig, ax1 = plt.subplots(figsize=(10, 6))
+
+        # Plot Moran's I values
+        color = 'tab:blue'
+        ax1.set_xlabel("Time Step")
+        ax1.set_ylabel("Moran's I", color=color)
+        ax1.plot(self.time_steps, moran_values, marker='o', color=color, label="Moran's I")
+        ax1.tick_params(axis='y', labelcolor=color)
+        ax1.axhline(y=0, color='red', linestyle='--', label="Moran's I = 0")
+        ax1.set_ylim(-1, 1)
+
+        # Annotate each point with Moran's I value
+        for i, mi_val in enumerate(moran_values):
+            ax1.annotate(f'{mi_val:.3f}', (self.time_steps[i], mi_val), textcoords="offset points", xytext=(0,10), ha='center')
+
+        # Create a second y-axis for p-values
+        ax2 = ax1.twinx()
+        color = 'tab:green'
+        ax2.set_ylabel("p-value", color=color)
+        ax2.plot(self.time_steps, p_values, marker='s', linestyle='--', color=color, label="p-value")
+        ax2.tick_params(axis='y', labelcolor=color)
+        ax2.set_ylim(-0.01, 0.1)
+
+        # Annotate each point with p-value
+        for i, p_val in enumerate(p_values):
+            ax2.annotate(f'{p_val:.2f}', (self.time_steps[i], p_val), textcoords="offset points", xytext=(0,-15), ha='center')
+
+        fig.tight_layout()  # Adjust layout to make room for annotations
+        fig.suptitle("Moran's I and p-value over Time Steps", y=1)
+        plt.show()
+        
+    def plot_gearys_c_over_time(self):
+        """
+        Calculates and plots Geary's C and p-values over multiple time steps.
+
+        Parameters:
+        - matrices: list of 2D numpy arrays representing different time steps.
+        - time_steps: list of integers representing the time steps.
+        """
+        # Create the matrix of weights 
+        w = lat2W(self.matrices[0].shape[0], self.matrices[0].shape[1])
+
+        # Calculate Geary's C and p-values for each matrix
+        geary_values = []
+        p_values = []
+        for matrix in self.matrices:
+            gc = Geary(matrix, w)
+            geary_values.append(gc.C)
+            p_values.append(gc.p_norm)
+
+        # Display Geary's C values and p-values
+        for i, (gc_val, p_val) in enumerate(zip(geary_values, p_values)):
+            print(f"Time Step {i+1} - Geary's C: {gc_val:.4f}, p-value: {p_val:.4f}")
+        
+        # Plot Geary's C vs. Time Steps
+        fig, ax1 = plt.subplots(figsize=(10, 6))
+
+        # Plot Geary's C values
+        color = 'tab:red'
+        ax1.set_xlabel("Time Step")
+        ax1.set_ylabel("Geary's C", color=color)
+        ax1.plot(self.time_steps, geary_values, marker='o', color=color, label="Geary's C")
+        ax1.tick_params(axis='y', labelcolor=color)
+        ax1.axhline(y=1, color='blue', linestyle='--', label="Geary's C = 1")
+        ax1.set_ylim(0, 2)
+
+        # Annotate each point with Geary's C value
+        for i, gc_val in enumerate(geary_values):
+            ax1.annotate(f'{gc_val:.3f}', (self.time_steps[i], gc_val), textcoords="offset points", xytext=(0,10), ha='center')
+
+        # Create a second y-axis for p-values
+        ax2 = ax1.twinx()
+        color = 'tab:green'
+        ax2.set_ylabel("p-value", color=color)
+        ax2.plot(self.time_steps, p_values, marker='s', linestyle='--', color=color, label="p-value")
+        ax2.tick_params(axis='y', labelcolor=color)
+        ax2.set_ylim(-0.01, 0.1)
+
+        # Annotate each point with p-value
+        for i, p_val in enumerate(p_values):
+            ax2.annotate(f'{p_val:.2f}', (self.time_steps[i], p_val), textcoords="offset points", xytext=(0,-15), ha='center')
+
+        fig.tight_layout()  # Adjust layout to make room for annotations
+        fig.suptitle("Geary's C and p-value over Time Steps", y=1)
+        plt.show()
+
 
 #%% Run a model
 
@@ -726,116 +844,25 @@ buffered_stream_mask = entropy_calculator.differentiate_hillslopes_and_streams_b
 buffered_stream_mask_scaled = entropy_calculator.differentiate_hillslopes_and_streams_scaled_buffer()
 mskd_ent_matrix_stream, mskd_ent_matrix_hillslope, _, _ = entropy_calculator.calculate_shannon_entropy_mask(stream_mask = tot_stream_mask)
 entropies_stream_array, entropies_hillslope_array = entropy_calculator.pixel_entropy_across_experiments_mask(mask = tot_stream_mask)
-#%%
+  
 
-def plot_morans_i_over_time(matrices, time_steps):
-    """
-    Calculates and plots Moran's I and p-values over multiple time steps.
+# Create an instance of Spatial_Autocorrelation 
+spatial_autocorr_calculator = Spatial_Autocorrelation(
+    grid=grid,
+    matrices=matrices,    
+    time_steps=time_steps
+)
 
-    Parameters:
-    - matrices: list of 2D numpy arrays representing different time steps.
-    - time_steps: list of integers representing the time steps.
-    """
-    # Create the matrix of weights 
-    w = lat2W(matrices[0].shape[0], matrices[0].shape[1])
-
-    # Calculate Moran's I and p-values for each matrix
-    moran_values = []
-    p_values = []
-    for matrix in matrices:
-        mi = Moran(matrix, w)
-        moran_values.append(mi.I)
-        p_values.append(mi.p_norm)
-
-    # Display Moran's I values and p-values
-    for i, (mi_val, p_val) in enumerate(zip(moran_values, p_values)):
-        print(f"Time Step {i+1} - Moran's I: {mi_val:.4f}, p-value: {p_val:.4f}")
+# Call the method    
+spatial_autocorr_calculator.plot_morans_i_over_time()
+spatial_autocorr_calculator.plot_gearys_c_over_time()
     
-    # Plot Moran's I vs. Time Steps
-    fig, ax1 = plt.subplots(figsize=(10, 6))
-
-    # Plot Moran's I values
-    color = 'tab:blue'
-    ax1.set_xlabel("Time Step")
-    ax1.set_ylabel("Moran's I", color=color)
-    ax1.plot(time_steps, moran_values, marker='o', color=color, label="Moran's I")
-    ax1.tick_params(axis='y', labelcolor=color)
-    ax1.axhline(y=0, color='red', linestyle='--', label="Moran's I = 0")
-    ax1.set_ylim(-1, 1)
-
-    # Annotate each point with Moran's I value
-    for i, mi_val in enumerate(moran_values):
-        ax1.annotate(f'{mi_val:.3f}', (time_steps[i], mi_val), textcoords="offset points", xytext=(0,10), ha='center')
-
-    # Create a second y-axis for p-values
-    ax2 = ax1.twinx()
-    color = 'tab:green'
-    ax2.set_ylabel("p-value", color=color)
-    ax2.plot(time_steps, p_values, marker='s', linestyle='--', color=color, label="p-value")
-    ax2.tick_params(axis='y', labelcolor=color)
-    ax2.set_ylim(-0.01, 0.1)
-
-    # Annotate each point with p-value
-    for i, p_val in enumerate(p_values):
-        ax2.annotate(f'{p_val:.2f}', (time_steps[i], p_val), textcoords="offset points", xytext=(0,-15), ha='center')
-
-    fig.tight_layout()  # Adjust layout to make room for annotations
-    fig.suptitle("Moran's I and p-value over Time Steps", y=1)
-    plt.show()
     
-def plot_gearys_c_over_time(matrices, time_steps):
-    """
-    Calculates and plots Geary's C and p-values over multiple time steps.
-
-    Parameters:
-    - matrices: list of 2D numpy arrays representing different time steps.
-    - time_steps: list of integers representing the time steps.
-    """
-    # Create the matrix of weights 
-    w = lat2W(matrices[0].shape[0], matrices[0].shape[1])
-
-    # Calculate Geary's C and p-values for each matrix
-    geary_values = []
-    p_values = []
-    for matrix in matrices:
-        gc = Geary(matrix, w)
-        geary_values.append(gc.C)
-        p_values.append(gc.p_norm)
-
-    # Display Geary's C values and p-values
-    for i, (gc_val, p_val) in enumerate(zip(geary_values, p_values)):
-        print(f"Time Step {i+1} - Geary's C: {gc_val:.4f}, p-value: {p_val:.4f}")
     
-    # Plot Geary's C vs. Time Steps
-    fig, ax1 = plt.subplots(figsize=(10, 6))
-
-    # Plot Geary's C values
-    color = 'tab:red'
-    ax1.set_xlabel("Time Step")
-    ax1.set_ylabel("Geary's C", color=color)
-    ax1.plot(time_steps, geary_values, marker='o', color=color, label="Geary's C")
-    ax1.tick_params(axis='y', labelcolor=color)
-    ax1.axhline(y=1, color='blue', linestyle='--', label="Geary's C = 1")
-    ax1.set_ylim(0, 2)
-
-    # Annotate each point with Geary's C value
-    for i, gc_val in enumerate(geary_values):
-        ax1.annotate(f'{gc_val:.3f}', (time_steps[i], gc_val), textcoords="offset points", xytext=(0,10), ha='center')
-
-    # Create a second y-axis for p-values
-    ax2 = ax1.twinx()
-    color = 'tab:green'
-    ax2.set_ylabel("p-value", color=color)
-    ax2.plot(time_steps, p_values, marker='s', linestyle='--', color=color, label="p-value")
-    ax2.tick_params(axis='y', labelcolor=color)
-    ax2.set_ylim(-0.01, 0.1)
-
-    # Annotate each point with p-value
-    for i, p_val in enumerate(p_values):
-        ax2.annotate(f'{p_val:.2f}', (time_steps[i], p_val), textcoords="offset points", xytext=(0,-15), ha='center')
-
-    fig.tight_layout()  # Adjust layout to make room for annotations
-    fig.suptitle("Geary's C and p-value over Time Steps", y=1)
-    plt.show()
     
-
+    
+    
+    
+    
+    
+    

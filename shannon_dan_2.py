@@ -988,10 +988,8 @@ matrices = [masked_grids['edem_15_0509_masked'],
 # Convert dtype to float because k_19 was int64 
 matrices = [np.array(matrix, dtype=np.float64) for matrix in matrices]
 
-###### THE GRID IN THE ASCII FILE IS IN A DIFFERENT ORGANIZATION THAN LANDLAB STUFF, MY FRIEND
-###### FIX THIS EARLIER IN THE CODE
-
-# Flip all matrices in the list along the vertical axis
+# Flip all matrices in the list along the vertical axis 
+# because ASCII grid and landlab grid are different
 matrices = [np.flipud(matrix) for matrix in matrices]
 
 
@@ -1005,49 +1003,6 @@ entropy_matrix_stream, entropy_matrix_hillslope, _, _ = calculate_shannon_entrop
 
 entropies_stream_array, entropies_hillslope_array = pixel_entropy_across_experiments_mask (grid, matrices, stream_mask)
 
-#%% Plotting hillshade
-
-# topo = np.ma.masked_equal(topo_mat_tot[0], -9999)
-
-
-# # Plot using imshowhs_grid
-# plt.figure(figsize=(10, 8))
-# imshowhs_grid(grid, 
-#               values=topo, 
-#               plot_type='Drape1',
-#               drape1=entropy_matrix_hillslope, cmap= 'plasma', 
-#               alpha=0.8,
-#               #color_for_closed='black', 
-#               var_name='Entropy', 
-#               add_double_colorbar=True)
-# plt.show()
-
-# # Plot using imshowhs_grid
-# plt.figure(figsize=(10, 8))
-# imshowhs_grid(grid, 
-#               values=topo, 
-#               plot_type='Drape1',
-#               drape1=entropy_matrix_stream, cmap= 'plasma', 
-#               alpha=0.8,
-#               #color_for_closed='black', 
-#               var_name='Entropy', 
-#               add_double_colorbar=True)
-# plt.show()
-
-
-
-
-# plt.figure(figsize=(10, 8))
-# imshowhs_grid(grid, topo, drape1=entropy_matrix_hillslope, cmap='plasma',
-#               var_name='Entropy (Hillslope Regions)', var_units='Entropy', add_double_colorbar=True)
-# plt.title("Topography with Hillshade")
-# plt.show()
-
-
-# plt.figure()
-# imshow_grid(grid, entropy_matrix_hillslope, cmap='plasma', grid_units=("m", "m"), var_name="Entropy (Stream Regions)", colorbar_label='Entropy')
-# plt.title("Entropy Matrix (Hillslope Regions)")
-# plt.show()
 
 
 

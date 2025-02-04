@@ -4,6 +4,11 @@
 Created on Thu Aug  8 11:20:26 2024
 
 @author: viviangrom
+
+Most of the post-class processing focuses on aligning and masking the data to ensure 
+all datasets overlap correctly. In the test example, one of the images contained a hole, 
+so I created a corresponding mask to apply a similar shape across the other images. 
+I’ve included all steps here in case these examples prove useful for others.
 """
 
 #%% Import libraries
@@ -758,83 +763,16 @@ def calculate_shannon_entropy_mask(grid, matrices, stream_mask, k_stream=None, k
 
 
 
-#%% Load Dan data
+#%% Load data
 
-k_19 = np.loadtxt(r'/Users/viviangrom/Documents/Project/Kali/ASCII_2/k_19.asc', skiprows=6)
-edem_15_0509 = np.loadtxt(r'/Users/viviangrom/Documents/Project/Kali/ASCII_2/edem_15_0509.asc', skiprows=6)
-edem_15_0510 = np.loadtxt(r'/Users/viviangrom/Documents/Project/Kali/ASCII_2/edem_15_0510.asc', skiprows=6)
-edem_17_0128 = np.loadtxt(r'/Users/viviangrom/Documents/Project/Kali/ASCII_2/edem_17_0128.asc', skiprows=6)
-edem_19_0105 = np.loadtxt(r'/Users/viviangrom/Documents/Project/Kali/ASCII_2/edem_19_0105.asc', skiprows=6)
-edem_19_0121 = np.loadtxt(r'/Users/viviangrom/Documents/Project/Kali/ASCII_2/edem_19_0121.asc', skiprows=6)
+k_19 = np.loadtxt(r'/Users/user/k_19.asc', skiprows=6)
+edem_15_0509 = np.loadtxt(r'/Users/user/edem_15_0509.asc', skiprows=6)
+edem_15_0510 = np.loadtxt(r'/Users/user/edem_15_0510.asc', skiprows=6)
+edem_17_0128 = np.loadtxt(r'/Users/user/edem_17_0128.asc', skiprows=6)
+edem_19_0105 = np.loadtxt(r'/Users/user/edem_19_0105.asc', skiprows=6)
+edem_19_0121 = np.loadtxt(r'/Users/user/edem_19_0121.asc', skiprows=6)
 
-#%% Fix shape k_19, because whenever I exported as a ASCII file it came with one less column and row
-
-# Metadata for k_19 (the incorrect grid)
-ncols_k19 = 2377
-nrows_k19 = 1221
-xllcorner_k19 = 770540.96661844
-yllcorner_k19 = 3191665.0930816
-cellsize_k19 = 2  # Replace with actual cell size if different
-
-# Metadata for the target grid (correct grid)
-ncols_target = 2378
-nrows_target = 1222
-xllcorner_target = 770540
-yllcorner_target = 3191664
-cellsize_target = 2  # Assuming the cell size is the same
-
-# Calculate the column and row offsets
-col_offset = int((xllcorner_target - xllcorner_k19) / cellsize_k19)
-row_offset = int((yllcorner_target - yllcorner_k19) / cellsize_k19)
-
-print(f'Column offset: {col_offset}, Row offset: {row_offset}')
-
-# Create an empty grid with the target dimensions, filled with NODATA values (-9999)
-aligned_k_19 = np.full((nrows_target, ncols_target), -9999)
-
-# Determine where to place the k_19 data within the aligned grid
-start_row = max(0, row_offset)
-start_col = max(0, col_offset)
-
-# Calculate the ending indices for the insertion
-end_row = start_row + k_19.shape[0]
-end_col = start_col + k_19.shape[1]
-
-# Place the k_19 data into the correct position within the aligned grid
-aligned_k_19[start_row:end_row, start_col:end_col] = k_19[:end_row-start_row, :end_col-start_col]
-
-# Verify the alignment by printing the shapes
-print(f'Original k_19 shape: {k_19.shape}')
-print(f'Aligned k_19 shape: {aligned_k_19.shape}')
-
-# Assuming the files are 2D arrays with the same dimensions
-grid = RasterModelGrid((nrows_target, ncols_target), xy_spacing=(2, 2))  # Adjust xy_spacing as necessary
-
-# Visualize the result to ensure the alignment looks correct
-cmap_terrain = mpl.cm.get_cmap("terrain").copy()
-imshow_grid(grid, aligned_k_19, var_name="Elevation", var_units="m", cmap=cmap_terrain, at='node')
-plt.title('Aligned k_19')
-plt.show()
-
-# Save k_19 with the new dimensions
-file_path = (r'/Users/viviangrom/Documents/Project/Kali/ASCII_2/k_19.asc')
-output_path = file_path.replace('.asc', '_masked.asc')
-
-# Save the masked grid to a new ASCII file
-with open(output_path, 'w') as f:
-    # Write the header
-    f.write(f"ncols        {ncols_target}\n")
-    f.write(f"nrows        {nrows_target}\n")
-    f.write(f"xllcorner    {xllcorner_target}\n")
-    f.write(f"yllcorner    {yllcorner_target}\n")
-    f.write(f"cellsize     {cellsize_target}\n")
-    f.write(f"NODATA_value -9999\n")
-    
-    # Write the masked grid data
-    np.savetxt(f, aligned_k_19, fmt='%f', delimiter=' ')
-
-
-#%% Plot Dan data
+#%% Plot Dan
 
 # Create a dictionary of grid names and data
 grids = {
@@ -861,11 +799,11 @@ plot_all_grids(grid, grids)
 
 # List of files to process
 files_to_process = [
-    r'/Users/viviangrom/Documents/Project/Kali/ASCII_2/edem_15_0509.asc',
-    r'/Users/viviangrom/Documents/Project/Kali/ASCII_2/edem_15_0510.asc',
-    r'/Users/viviangrom/Documents/Project/Kali/ASCII_2/edem_17_0128.asc',
-    r'/Users/viviangrom/Documents/Project/Kali/ASCII_2/edem_19_0105.asc',
-    r'/Users/viviangrom/Documents/Project/Kali/ASCII_2/edem_19_0121.asc',
+    r'/Users/user/edem_15_0509.asc',
+    r'/Users/user/edem_15_0510.asc',
+    r'/Users/user/edem_17_0128.asc',
+    r'/Users/user/edem_19_0105.asc',
+    r'/Users/user/edem_19_0121.asc',
 ]
 
 mask = aligned_k_19 != -9999
@@ -911,7 +849,7 @@ for file_path in files_to_process:
 plot_all_grids(grid, masked_grids)
 
 #%% Mask data to match 19_0121, which has a hole in the data
-# Just in case we need to mask anything else, but I'm too lazy to run again the block above
+# Just in case we need to mask anything else
 def mask_and_save_grids(files_to_process, mask, suffix):
     
     masked_grids = {}
@@ -952,12 +890,12 @@ def mask_and_save_grids(files_to_process, mask, suffix):
 
 # List of files to process
 files_to_process = [
-    r'/Users/viviangrom/Documents/Project/Kali/ASCII_2/edem_15_0509_masked.asc',
-    r'/Users/viviangrom/Documents/Project/Kali/ASCII_2/edem_15_0510_masked.asc',
-    r'/Users/viviangrom/Documents/Project/Kali/ASCII_2/edem_17_0128_masked.asc',
-    r'/Users/viviangrom/Documents/Project/Kali/ASCII_2/edem_19_0105_masked.asc',
-    r'/Users/viviangrom/Documents/Project/Kali/ASCII_2/edem_19_0121_masked.asc',
-    r'/Users/viviangrom/Documents/Project/Kali/ASCII_2/k_19_masked.asc'
+    r'/Users/user/edem_15_0509_masked.asc',
+    r'/Users/user/edem_15_0510_masked.asc',
+    r'/Users/user/edem_17_0128_masked.asc',
+    r'/Users/user/edem_19_0105_masked.asc',
+    r'/Users/user/edem_19_0121_masked.asc',
+    r'/Users/user/k_19_masked.asc'
 ]
 
 mask_2 = masked_grids['edem_19_0121_masked'] != -9999
@@ -969,14 +907,6 @@ hole_grids = mask_and_save_grids(files_to_process, mask_2, suffix = '_hole.asc')
 plot_all_grids(grid, hole_grids)
 
 #%% User defined
-
-# matrices = [hole_grids['edem_15_0509_masked_hole.asc'], 
-#             hole_grids['edem_15_0510_masked_hole.asc'],
-#             hole_grids['edem_17_0128_masked_hole.asc'], 
-#             hole_grids['edem_19_0105_masked_hole.asc'],
-#             hole_grids['edem_19_0121_masked_hole.asc'], 
-#             hole_grids['k_19_masked_hole.asc'],
-#             ]
 
 matrices = [masked_grids['edem_15_0509_masked'], 
             masked_grids['edem_15_0510_masked'],

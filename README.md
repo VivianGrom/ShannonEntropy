@@ -16,5 +16,8 @@ Case Studies (These scripts generate the processed outputs used for the paper's 
 - 'exp3.py' – A case study investigating spatially variable uplift.
 - 'shannon_edem.py' – An example demonstrating entropy calculations using alternative data grids.
 
+Raw data
+- 'nc_files' - NetCDF (.nc) files containing time-resolved snapshots of Landscape Evolution Model outputs for each experiment. Each file stores gridded fields of topographic elevation (topographic__elevation) and soil depth (soil__depth) on a raster grid, with dimensions (time, y, x). Metadata include grid size, node spacing, spatial units (meters), and model configuration parameters. These files represent the raw model outputs from which processed datasets and figures are derived.
+
 
 This repository provides a structured approach to quantifying spatial patterns and variability within LEM outputs, facilitating comparative analysis across different uplift scenarios.

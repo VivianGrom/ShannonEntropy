@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Fri Jul 26 13:30:53 2024
+Created on Tue Jul 15 19:04:02 2025
 
 @author: viviangrom
 """
+
 #%% Import libraries
 import numpy as np
 from matplotlib import pyplot as plt
@@ -13,11 +14,19 @@ from landlab import RasterModelGrid, imshow_grid, imshowhs_grid
 from landlab.components import (
     FlowAccumulator,
     StreamPowerEroder,
-)
-from landlab.plot.drainage_plot import drainage_plot
+    PriorityFloodFlowRouter,
+    ExponentialWeatherer,
+    DepthDependentTaylorDiffuser,
+    SpaceLargeScaleEroder,
+    SteepnessFinder,
+    ChiFinder,
+    ChannelProfiler
+    )
 from libpysal.weights import lat2W
 from esda.moran import Moran
 from esda.geary import Geary
+
+
 
 #%% Classes
 class Shannon_Entropy:
@@ -68,6 +77,11 @@ class Shannon_Entropy:
             imshow_grid(self.grid, R, grid_units=("m", "m"), cmap='Blues', var_name="Modular Difference")
             plt.title("Modular Difference Matrix R")
             plt.show()
+            
+            max_R_pixel = np.argmax(R)
+            max_R_pixel = np.unravel_index(max_R_pixel, self.grid.shape)
+            print(f"First pixel with highest absolute value: {max_R_pixel} -> Value: {R[max_R_pixel]}")
+
 
         # Calculate probabilities
         if self.n == 2:
@@ -92,6 +106,10 @@ class Shannon_Entropy:
         imshow_grid(self.grid, entropy_matrix, cmap='plasma', grid_units=("m", "m"), var_name="Entropy")
         plt.title("Entropy Matrix")
         plt.show()
+        
+        max_entropy_pixel = np.argmax(entropy_matrix)
+        max_entropy_pixel = np.unravel_index(max_entropy_pixel, self.grid.shape)
+        print(f"First pixel with highest entropy value: {max_entropy_pixel} -> Value: {entropy_matrix[max_entropy_pixel]}")
 
         return entropy_matrix, probabilities
     
@@ -122,7 +140,7 @@ class Shannon_Entropy:
         print("k global is: ", self.k_global)
         
         max_k_pixel = np.argmax(R)
-        max_abs_pixel = np.unravel_index(max_k_pixel, grid.shape)
+        max_abs_pixel = np.unravel_index(max_k_pixel, self.grid.shape)
         print(f"Pixel with highest absolute value: {max_abs_pixel} -> Value: {R[max_abs_pixel]}")
         
         if self.pixel is None:
@@ -207,12 +225,13 @@ class Shannon_Entropy:
             slope = slope.reshape(self.grid.shape)
 
             # Classify nodes
-            stream_mask = (drainage_area > stream_threshold)
+            stream_mask = (drainage_area > self.stream_threshold)
             stream_masks.append(stream_mask)
 
         # Sum the stream masks
         tot_stream_mask = np.any(stream_masks, axis=0)
         plt.figure()
+        # plt.ylim(0,1)
         imshow_grid(self.grid, tot_stream_mask.astype(int), grid_units=("m", "m"), var_name="Total Stream Mask", cmap="Blues")
         plt.title("Total Streams Mask")
         plt.show()
@@ -264,6 +283,7 @@ class Shannon_Entropy:
         buffered_stream_mask = maximum_filter(tot_stream_mask.astype(int), size=self.filter_size).astype(bool)
 
         plt.figure()
+        # plt.ylim(0,1)
         imshow_grid(self.grid, buffered_stream_mask.astype(int), grid_units=("m", "m"), var_name="Buffered Stream Mask", cmap="Blues")
         plt.title("Buffered Streams Mask")
         plt.show()
@@ -276,71 +296,67 @@ class Shannon_Entropy:
 
     def differentiate_hillslopes_and_streams_scaled_buffer(self):
         """
-        Function to differentiate hillslopes and streams based on drainage area and slope thresholds with scaled buffer.
-        
-        Parameters:
-        - grid (RasterModelGrid): The Landlab model grid.
-        - elevations: List of elevation arrays at different time steps.
-        - stream_threshold (float): Threshold for drainage area to classify as stream.
-        - slope_threshold (float): Threshold for slope to classify as stream.
-        - buffer_scaling_factor (float): Factor to scale the buffer size based on drainage area.
-
+        Differentiate hillslopes and streams using drainage area and slope thresholds.
+        Applies a spatial buffer scaled by drainage area around stream nodes across time steps.
+    
         Returns:
-        - tot_stream_mask (np.ndarray): Total Boolean mask indicating stream nodes across all time steps.
+            - buffered_stream_mask_scaled: Boolean 2D array (y,x) showing all buffered stream areas.
         """
-        stream_masks = []
-        dxy = grid.dx
+        dxy = self.grid.dx
+        all_buffered_masks = []
         slopes = []
-
+    
         for matrix in self.matrices:
-            # Set the elevation data to the grid
             self.grid.at_node['topographic__elevation'] = matrix
-
-            # Calculate drainage area
+    
+            # Flow accumulation
             fa = FlowAccumulator(self.grid, flow_director="FlowDirectorD8")
             fa.run_one_step()
             drainage_area = self.grid.at_node['drainage_area']
-
-            # Calculate slope
+    
+            # Slope
             slope = self.grid.calc_slope_at_node()
-
-            # Reshape for plotting and classification
-            drainage_area = drainage_area.reshape(self.grid.shape) / (dxy**2)
             slope = slope.reshape(self.grid.shape)
             slopes.append(slope)
-
-            # Classify nodes
-            stream_mask = (drainage_area > self.stream_threshold)
-            stream_masks.append(stream_mask)
-
-        # Sum the stream masks
-        tot_stream_mask = np.any(stream_masks, axis=0)
-
-        # Calculate buffer size dynamically based on drainage area
-        buffer_size_array = (drainage_area * self.buffer_scaling_factor).astype(int)
-        buffer_size_array[buffer_size_array < 1] = self.minimum_buffer_size  # Ensure minimum buffer size is 1
-
-        # Initialize the buffered stream mask
-        buffered_stream_mask = np.zeros_like(tot_stream_mask)
-
-        for i in range(self.grid.shape[0]):
-            for j in range(self.grid.shape[1]):
-                if tot_stream_mask[i, j]:
-                    buffer_size = buffer_size_array[i, j]
-                    buffered_stream_mask[max(0, i-buffer_size):min(self.grid.shape[0], i+buffer_size+1),
-                                         max(0, j-buffer_size):min(self.grid.shape[1], j+buffer_size+1)] = 1
-
-        buffered_stream_mask_scaled = buffered_stream_mask.astype(bool)
-
+    
+            # Reshape and normalize drainage area
+            drainage_area_rs = drainage_area.reshape(self.grid.shape) / (dxy ** 2)
+    
+            # Stream mask at this time step
+            stream_mask = (drainage_area_rs > self.stream_threshold)
+    
+            # Buffer size map
+            buffer_size_array = (drainage_area_rs * self.buffer_scaling_factor).astype(int)
+            buffer_size_array[buffer_size_array < 1] = int(self.minimum_buffer_size)
+    
+            # Initialize per-time-step buffer
+            buffered_mask = np.zeros_like(stream_mask, dtype=bool)
+    
+            for i in range(self.grid.shape[0]):
+                for j in range(self.grid.shape[1]):
+                    if stream_mask[i, j]:
+                        buf = buffer_size_array[i, j]
+                        buffered_mask[
+                            max(0, i - buf):min(self.grid.shape[0], i + buf + 1),
+                            max(0, j - buf):min(self.grid.shape[1], j + buf + 1)
+                        ] = True
+    
+            all_buffered_masks.append(buffered_mask)
+    
+        # Combine all buffered masks across time steps
+        buffered_stream_mask_scaled = np.any(all_buffered_masks, axis=0)
+    
+        # Plot
         plt.figure()
-        imshow_grid(self.grid, buffered_stream_mask.astype(int), grid_units=("m", "m"), var_name="Buffered Stream Mask", cmap="Blues")
-        plt.title("Buffered Streams Mask - Scaled")
+        imshow_grid(self.grid, buffered_stream_mask_scaled.astype(int), grid_units=("m", "m"), var_name="Buffered Stream Mask", cmap="Blues")
+        plt.title("Buffered Streams Mask - Scaled (All Time Steps)")
         plt.show()
-
+    
         max_slope = np.max(slopes)
         print("max slope is: ", max_slope)
-
+    
         return buffered_stream_mask_scaled
+
     
     def calculate_shannon_entropy_mask(self, stream_mask):
         """
@@ -521,89 +537,156 @@ class Shannon_Entropy:
         
         mod_pixel_values_stream = mod_stream_array[:, row_stream, col_stream]
         mod_pixel_values_hillslope = mod_hillslope_array[:, row_hillslope, col_hillslope]
-        
-        # Plotting stream pixel entropy
-        plt.figure(figsize=(15, 6))
-        plt.plot(range(1, len(entropies_stream_array) + 1), pixel_values_stream, marker='o', linestyle='-', color='b')
-        #plt.xticks(np.arange(0, 271, 20))
-        #plt.xticks(np.arange(0, len(entropies_stream_array) + 1, 1))  # Adjust the range as needed
-        plt.xlabel('Time Step')
-        plt.ylabel(f'Entropy at Stream Pixel ({row_stream}, {col_stream})')
-        plt.ylim(0, 1)
-        plt.title(f'Entropy across pairs of matrices for Stream pixel: ({row_stream}, {col_stream})')
-        plt.grid(True)
-        plt.tight_layout()
-        plt.show()
 
-        # Plotting stream pixel module
-        plt.figure(figsize=(15, 6))
-        plt.plot(range(1, len(mod_stream_array) + 1), mod_pixel_values_stream, marker='o', linestyle='-', color='b')
-        #plt.xticks(np.arange(0, 271, 20))
-        #plt.xticks(np.arange(0, len(entropies_stream_array) + 1, 1))  # Adjust the range as needed
-        plt.xlabel('Time Step')
-        plt.ylabel(f'Modular Difference Evolution for Stream Pixel ({row_stream}, {col_stream})')
-        #plt.ylim(0, 1)
-        plt.title(f'Modular Difference across pairs of matrices for Stream pixel: ({row_stream}, {col_stream})')
-        plt.grid(True)
-        plt.tight_layout()
-        plt.show()
+        timesteps = range(1, len(entropies_stream_array) + 1)        
 
-        # Plotting hillslope pixel entropy
-        plt.figure(figsize=(15, 6))
-        plt.plot(range(1, len(entropies_hillslope_array) + 1), pixel_values_hillslope, marker='o', linestyle='-', color='r')
-        #plt.xticks(np.arange(0, 271, 20))
-        #plt.xticks(np.arange(0, len(entropies_hillslope_array) + 1, 1))  # Adjust the range as needed
-        plt.xlabel('Time Step')
-        plt.ylabel(f'Entropy at Hillslope Pixel ({row_hillslope}, {col_hillslope})')
-        plt.ylim(0, 1)
-        plt.title(f'Entropy across pairs of matrices for Hillslope pixel: ({row_hillslope}, {col_hillslope})')
+        
+        # -----------------------------
+        # Settings
+        # -----------------------------
+        figsize = (12, 6)
+        label_font_size = 20
+        title_font_size = 24
+        tick_font_size = 22
+        marker_size = 10
+        line_width = 3
+        
+        # -----------------------------
+        # Stream Pixel Entropy
+        # -----------------------------
+        plt.figure(figsize=figsize)
+        plt.plot(timesteps, pixel_values_stream,
+                 marker='o', linestyle='-', color='black',
+                 markersize=marker_size, linewidth=line_width)
+        plt.xlabel('Time Step', fontsize=label_font_size)
+        plt.ylabel('Entropy', fontsize=label_font_size)
+        plt.ylim(0, 1.1)
+        plt.title(f'Entropy across pairs of matrices for Stream Pixel ({row_stream}, {col_stream})',
+                  fontsize=title_font_size, pad=30)
+        for x, y in zip(timesteps, pixel_values_stream):
+            plt.annotate(f'{y:.2f}', (x, y),
+                         fontsize=22,
+                         xycoords="data",
+                         textcoords="offset points",
+                         xytext=(0,-25), ha="center")
         plt.grid(True)
+        plt.xticks(fontsize=tick_font_size)
+        plt.yticks(fontsize=tick_font_size)
         plt.tight_layout()
         plt.show()
         
-        # Plotting stream pixel module
-        plt.figure(figsize=(15, 6))
-        plt.plot(range(1, len(mod_hillslope_array) + 1), mod_pixel_values_hillslope, marker='o', linestyle='-', color='b')
-        #plt.xticks(np.arange(0, 271, 20))
-        #plt.xticks(np.arange(0, len(entropies_stream_array) + 1, 1))  # Adjust the range as needed
-        plt.xlabel('Time Step')
-        plt.ylabel(f'Modular Difference Evolution for Hillslope Pixel ({row_stream}, {col_stream})')
-        #plt.ylim(0, 1)
-        plt.title(f'Modular Difference across pairs of matrices for Hillslope pixel: ({row_stream}, {col_stream})')
+        # -----------------------------
+        # Stream Pixel Modular Difference
+        # -----------------------------
+        plt.figure(figsize=figsize)
+        plt.plot(timesteps, mod_pixel_values_stream,
+                 marker='o', linestyle='-', color='black',  # dashed line for modular difference
+                 markersize=marker_size, linewidth=line_width)
+        plt.xlabel('Time Step', fontsize=label_font_size)
+        plt.ylim(10, 90)
+        plt.ylabel('Modular Difference', fontsize=label_font_size)
+        plt.title(f'Modular Difference across pairs of matrices for Stream Pixel ({row_stream}, {col_stream})',
+                  fontsize=title_font_size, pad=30)
+        for x, y in zip(timesteps, mod_pixel_values_stream):
+            plt.annotate(f'{y:.2f}', (x, y),
+                         fontsize=22,
+                         xycoords="data",
+                         textcoords="offset points",
+                         xytext=(0,20), ha="center")
         plt.grid(True)
+        plt.xticks(fontsize=tick_font_size)
+        plt.yticks(fontsize=tick_font_size)
         plt.tight_layout()
         plt.show()
         
+        # -----------------------------
+        # Hillslope Pixel Entropy
+        # -----------------------------
+        plt.figure(figsize=figsize)
+        plt.plot(timesteps, pixel_values_hillslope,
+                 marker='o', linestyle='--', color='black',
+                 markersize=marker_size, linewidth=line_width)
+        plt.xlabel('Time Step', fontsize=label_font_size)
+        plt.ylabel('Entropy', fontsize=label_font_size)
+        plt.ylim(0, 1.1)
+        plt.title(f'Entropy across pairs of matrices for Hillslope Pixel ({row_hillslope}, {col_hillslope})',
+                  fontsize=title_font_size, pad=30)
+        for x, y in zip(timesteps, pixel_values_hillslope):
+            plt.annotate(f'{y:.2f}', (x, y),
+                         fontsize=22,
+                         xycoords="data",
+                         textcoords="offset points",
+                         xytext=(0,-25), ha="center")
+        plt.grid(True)
+        plt.xticks(fontsize=tick_font_size)
+        plt.yticks(fontsize=tick_font_size)
+        plt.tight_layout()
+        plt.show()
+        
+        # -----------------------------
+        # Hillslope Pixel Modular Difference
+        # -----------------------------
+        plt.figure(figsize=figsize)
+        plt.plot(timesteps, mod_pixel_values_hillslope,
+                 marker='o', linestyle='--', color='black',  # dashed line for modular difference
+                 markersize=marker_size, linewidth=line_width)
+        plt.xlabel('Time Step', fontsize=label_font_size)
+        plt.ylabel('Modular Difference', fontsize=label_font_size)
+        plt.ylim(10, 90)
+        plt.title(f'Modular Difference across pairs of matrices for Hillslope Pixel ({row_hillslope}, {col_hillslope})',
+                  fontsize=title_font_size, pad=30)
+        for x, y in zip(timesteps, mod_pixel_values_hillslope):
+            plt.annotate(f'{y:.2f}', (x, y),
+                         fontsize=22,
+                         xycoords="data",
+                         textcoords="offset points",
+                         xytext=(0,20), ha="center")
+        plt.grid(True)
+        plt.xticks(fontsize=tick_font_size)
+        plt.yticks(fontsize=tick_font_size)
+        plt.tight_layout()
+        plt.show()
+ 
         # Highlight the pixels in the grid
 
-        grid.add_zeros('node', 'pixel_loc', clobber=True)
+        self.grid.add_zeros('node', 'pixel_loc', clobber=True)
         
         # Convert the 2D pixel coordinate to 1D node index
-        node_id_stream = grid.grid_coords_to_node_id(row_stream, col_stream)
-        node_id_hillslope = grid.grid_coords_to_node_id(row_hillslope, col_hillslope)
+        node_id_stream = self.grid.grid_coords_to_node_id(row_stream, col_stream)
+        node_id_hillslope = self.grid.grid_coords_to_node_id(row_hillslope, col_hillslope)
         
         # Add 1 to pixel loc
-        grid.at_node['pixel_loc'][node_id_stream] += 1
-        grid.at_node['pixel_loc'][node_id_hillslope] += 1
+        self.grid.at_node['pixel_loc'][node_id_stream] += 1
+        self.grid.at_node['pixel_loc'][node_id_hillslope] += 1
         
-        pixel_loc = grid.at_node['pixel_loc']
+        pixel_loc = self.grid.at_node['pixel_loc']
 
         # Replace all 0 values with NaN
         pixel_loc['pixel_loc' == 0] = np.nan
         
         plt.figure()
         topo = np.ma.masked_equal(self.matrices[0], -9999)
-        plt.figure(figsize=(10, 8))
-        imshowhs_grid(grid, 
-                      values=topo, 
-                      plot_type='Drape1',
-                      drape1='pixel_loc', cmap= 'Reds', 
-                      alpha=0.5,
-                      #color_for_closed='black', 
-                      var_name='Pixel Loc', 
-                      add_double_colorbar=True)
-        plt.show()
+
+        fig, ax = plt.subplots(figsize=(10, 8))
         
+        imshowhs_grid(
+            self.grid,
+            values=topo,
+            plot_type='Drape1',
+            drape1='pixel_loc',
+            cmap='Reds',
+            alpha=0.5,
+            color_for_closed='black',
+            var_name='Pixel Loc',
+            add_double_colorbar=False
+        )
+        
+        # Remove all non-data axes (colorbars, legends, etc.)
+        for a in fig.axes:
+            if a != ax:
+                fig.delaxes(a)
+        
+        plt.show()        
         
         return entropies_stream_array, entropies_hillslope_array
     
@@ -615,244 +698,218 @@ class Spatial_Autocorrelation:
         self.time_steps = time_steps
         
     def plot_morans_i_over_time(self):
-        """
-        Calculates and plots Moran's I and p-values over multiple time steps.
-
-        Parameters:
-        - matrices: list of 2D numpy arrays representing different time steps.
-        - time_steps: list of integers representing the time steps.
-        """
-        # Create the matrix of weights 
+        import matplotlib.pyplot as plt
+    
+        # Calculate Moran's I and p-values
         w = lat2W(self.matrices[0].shape[0], self.matrices[0].shape[1])
-
-        # Calculate Moran's I and p-values for each matrix
         moran_values = []
         p_values = []
         for matrix in self.matrices:
             mi = Moran(matrix, w)
             moran_values.append(mi.I)
             p_values.append(mi.p_norm)
-
-        # Display Moran's I values and p-values
+    
+        # Display values
         for i, (mi_val, p_val) in enumerate(zip(moran_values, p_values)):
             print(f"Time Step {i+1} - Moran's I: {mi_val:.4f}, p-value: {p_val:.4f}")
-        
-        # Plot Moran's I vs. Time Steps
+    
+        # Plot
         fig, ax1 = plt.subplots(figsize=(10, 6))
-
-        # Plot Moran's I values
-        color = 'tab:blue'
-        ax1.set_xlabel("Time Step")
-        ax1.set_ylabel("Moran's I", color=color)
-        ax1.plot(self.time_steps, moran_values, marker='o', color=color, label="Moran's I")
-        ax1.tick_params(axis='y', labelcolor=color)
-        ax1.axhline(y=0, color='red', linestyle='--', label="Moran's I = 0")
+    
+        # Settings
+        label_font_size = 20
+        title_font_size = 24
+        tick_font_size = 18
+        marker_size = 10
+        line_width = 2
+    
+        # Moran's I (solid black with dot)
+        ax1.plot(self.time_steps, moran_values,
+                 marker='o', linestyle='-', color='black',
+                 markersize=marker_size, linewidth=line_width)
+        ax1.set_xlabel("Time Step", fontsize=label_font_size)
+        ax1.set_ylabel("Moran's I", fontsize=label_font_size)
+        ax1.tick_params(axis='x', labelsize=tick_font_size)
+        ax1.tick_params(axis='y', labelsize=tick_font_size)
         ax1.set_ylim(-1, 1)
-
-        # Annotate each point with Moran's I value
-        for i, mi_val in enumerate(moran_values):
-            ax1.annotate(f'{mi_val:.3f}', (self.time_steps[i], mi_val), textcoords="offset points", xytext=(0,10), ha='center')
-
-        # Create a second y-axis for p-values
+    
+        # Annotate Moran's I
+        for x, y in zip(self.time_steps, moran_values):
+            ax1.annotate(f'{y:.3f}', (x, y),
+                         fontsize=18,
+                         xycoords="data",
+                         textcoords="offset points",
+                         xytext=(0,10), ha="center")
+    
+        # p-values (dashed black with dot)
         ax2 = ax1.twinx()
-        color = 'tab:green'
-        ax2.set_ylabel("p-value", color=color)
-        ax2.plot(self.time_steps, p_values, marker='s', linestyle='--', color=color, label="p-value")
-        ax2.tick_params(axis='y', labelcolor=color)
+        ax2.plot(self.time_steps, p_values,
+                 marker='s', linestyle='--', color='black',
+                 markersize=marker_size, linewidth=line_width)
+        ax2.set_ylabel("p-value", fontsize=label_font_size)
+        ax2.tick_params(axis='y', labelsize=tick_font_size)
         ax2.set_ylim(-0.01, 0.1)
-
-        # Annotate each point with p-value
-        for i, p_val in enumerate(p_values):
-            ax2.annotate(f'{p_val:.2f}', (self.time_steps[i], p_val), textcoords="offset points", xytext=(0,-15), ha='center')
-
-        fig.tight_layout()  # Adjust layout to make room for annotations
-        fig.suptitle("Moran's I and p-value over Time Steps", y=1)
+    
+        # Annotate p-values
+        for x, y in zip(self.time_steps, p_values):
+            ax2.annotate(f'{y:.2f}', (x, y),
+                         fontsize=18,
+                         xycoords="data",
+                         textcoords="offset points",
+                         xytext=(0,-15), ha="center")
+    
+        # Title with space above plot
+        fig.suptitle("Moran's I and p-value over Time Steps",
+                     fontsize=title_font_size)
+    
+        fig.tight_layout()
         plt.show()
-        
+
+    
+    
     def plot_gearys_c_over_time(self):
-        """
-        Calculates and plots Geary's C and p-values over multiple time steps.
-
-        Parameters:
-        - matrices: list of 2D numpy arrays representing different time steps.
-        - time_steps: list of integers representing the time steps.
-        """
-        # Create the matrix of weights 
+        import matplotlib.pyplot as plt
+    
+        # Calculate Geary's C and p-values
         w = lat2W(self.matrices[0].shape[0], self.matrices[0].shape[1])
-
-        # Calculate Geary's C and p-values for each matrix
         geary_values = []
         p_values = []
         for matrix in self.matrices:
             gc = Geary(matrix, w)
             geary_values.append(gc.C)
             p_values.append(gc.p_norm)
-
-        # Display Geary's C values and p-values
+    
+        # Display values
         for i, (gc_val, p_val) in enumerate(zip(geary_values, p_values)):
             print(f"Time Step {i+1} - Geary's C: {gc_val:.4f}, p-value: {p_val:.4f}")
-        
-        # Plot Geary's C vs. Time Steps
+    
+        # Plot
         fig, ax1 = plt.subplots(figsize=(10, 6))
-
-        # Plot Geary's C values
-        color = 'tab:red'
-        ax1.set_xlabel("Time Step")
-        ax1.set_ylabel("Geary's C", color=color)
-        ax1.plot(self.time_steps, geary_values, marker='o', color=color, label="Geary's C")
-        ax1.tick_params(axis='y', labelcolor=color)
-        ax1.axhline(y=1, color='blue', linestyle='--', label="Geary's C = 1")
+    
+        # Settings
+        label_font_size = 20
+        title_font_size = 24
+        tick_font_size = 18
+        marker_size = 10
+        line_width = 2
+    
+        # Geary's C (solid black with dot)
+        ax1.plot(self.time_steps, geary_values,
+                 marker='o', linestyle='-', color='black',
+                 markersize=marker_size, linewidth=line_width)
+        ax1.set_xlabel("Time Step", fontsize=label_font_size)
+        ax1.set_ylabel("Geary's C", fontsize=label_font_size)
+        ax1.tick_params(axis='x', labelsize=tick_font_size)
+        ax1.tick_params(axis='y', labelsize=tick_font_size)
         ax1.set_ylim(0, 2)
-
-        # Annotate each point with Geary's C value
-        for i, gc_val in enumerate(geary_values):
-            ax1.annotate(f'{gc_val:.3f}', (self.time_steps[i], gc_val), textcoords="offset points", xytext=(0,10), ha='center')
-
-        # Create a second y-axis for p-values
+    
+        # Annotate Geary's C
+        for x, y in zip(self.time_steps, geary_values):
+            ax1.annotate(f'{y:.3f}', (x, y),
+                         fontsize=18,
+                         xycoords="data",
+                         textcoords="offset points",
+                         xytext=(0,20), ha="center")
+    
+        # p-values (dashed black with dot)
         ax2 = ax1.twinx()
-        color = 'tab:green'
-        ax2.set_ylabel("p-value", color=color)
-        ax2.plot(self.time_steps, p_values, marker='s', linestyle='--', color=color, label="p-value")
-        ax2.tick_params(axis='y', labelcolor=color)
+        ax2.plot(self.time_steps, p_values,
+                 marker='s', linestyle='--', color='black',
+                 markersize=marker_size, linewidth=line_width)
+        ax2.set_ylabel("p-value", fontsize=label_font_size)
+        ax2.tick_params(axis='y', labelsize=tick_font_size)
         ax2.set_ylim(-0.01, 0.1)
-
-        # Annotate each point with p-value
-        for i, p_val in enumerate(p_values):
-            ax2.annotate(f'{p_val:.2f}', (self.time_steps[i], p_val), textcoords="offset points", xytext=(0,-15), ha='center')
-
-        fig.tight_layout()  # Adjust layout to make room for annotations
-        fig.suptitle("Geary's C and p-value over Time Steps", y=1)
-        plt.show()
-
-
-#%% Run a model
-
-# Model grid
-number_of_rows = 10  # number of raster cells in vertical direction (y)
-number_of_columns = 10  # number of raster cells in horizontal direction (x)
-dxy = 10  # side length of a raster model cell, or resolution [m]
-mg1 = RasterModelGrid((number_of_rows, number_of_columns), dxy)
-mg1.set_closed_boundaries_at_grid_edges(True, True, True, False) # Set boundary conditions
-
-# Initialize landscape
-np.random.seed(35)  # seed set so our figures are reproducible
-mg1_noise = (np.random.rand(mg1.number_of_nodes) / 1000.0)  # initial noise on elevation grid
-z1 = mg1.add_zeros("topographic__elevation", at="node") # set up the elevation on the grid
-z1 += mg1_noise
-
-
-# Timesteps
-tmax = 6000  # time for the model to run [yr] (Original value was 5E5 yr)
-dt = 500  # time step [yr] (Original value was 100 yr)
-total_time = 0  # amount of time the landscape has evolved [yr]
-t = np.arange(0, tmax, dt)  # each of the time steps that the code will run
-
-# Original K_sp value is 1e-5
-K_sp = 1.0e-3  # units vary depending on m_sp and n_sp
-m_sp = 0.5  # exponent on drainage area in stream power equation
-n_sp = 1.0  # exponent on slope in stream power equation
-
-frr = FlowAccumulator(mg1, flow_director="FlowDirectorD8")  # initializing flow routing
-spr = StreamPowerEroder(mg1, K_sp=K_sp, m_sp=m_sp, n_sp=n_sp, threshold_sp=0.0)  # initializing stream power incision
-theta = m_sp / n_sp
-
-uplift_rate = np.ones(mg1.number_of_nodes) * 0.0001
-
-# Model runs
-
-mg1_snapshots = []  # List to store mg1 state at each timestep
-stream_masks = []
-
-
-
-for ti in t:
-    z1[mg1.core_nodes] += uplift_rate[mg1.core_nodes] * dt  # uplift the landscape
-    frr.run_one_step()  # route flow
-    spr.run_one_step(dt)  # fluvial incision
-    total_time += dt  # update time keeper
-    print(total_time)
     
-    if ti > 3500:
-        # Save a snapshot of mg1 state
-        z1_rshpd = z1.reshape(mg1.shape)
-        mg1_snapshots.append(z1_rshpd.copy())
-        # Plots snapshots used for entropy calculation
-        plt.figure()
-        imshow_grid(mg1, z1, grid_units=("m", "m"),cmap='terrain', var_name="Elevation (m)", vmax = 0.8)
-        plt.title(f"Elevation at time {total_time} yr")
+        # Annotate p-values
+        for x, y in zip(self.time_steps, p_values):
+            ax2.annotate(f'{y:.2f}', (x, y),
+                         fontsize=18,
+                         xycoords="data",
+                         textcoords="offset points",
+                         xytext=(0,-20), ha="center")
+    
+        # Title with space above plot
+        fig.suptitle("Geary's C and p-value over Time Steps",
+                     fontsize=title_font_size)
+    
+        fig.tight_layout()
         plt.show()
-      
-  
-        max_elev = np.max(z1)
-        print("Maximum elevation is ", np.max(z1))
+
+
         
-        plt.figure()
-        drainage_plot(mg1, 'topographic__elevation')
+    def plot_morans_i_and_gearys_c(self):
+        """
+        Calculates and plots Moran's I, Geary's C, and their p-values over multiple time steps.
+    
+        Parameters:
+        - matrices: list of 2D numpy arrays representing different time steps.
+        - time_steps: list of integers representing the time steps.
+        """
+
+        # Create the matrix of weights 
+        w = lat2W(self.matrices[0].shape[0], self.matrices[0].shape[1])
+    
+        # Initialize lists for Moran's I, Geary's C, and their p-values
+        moran_values, geary_values = [], []
+        moran_p_values, geary_p_values = [], []
+    
+        # Compute Moran's I and Geary's C for each time step
+        for matrix in self.matrices:
+            mi = Moran(matrix, w)
+            gc = Geary(matrix, w)
+            moran_values.append(mi.I)
+            moran_p_values.append(mi.p_norm)
+            geary_values.append(gc.C)
+            geary_p_values.append(gc.p_norm)
+    
+        # Set font sizes
+        label_font_size = 35
+        title_font_size = 35
+        tick_font_size = 35
+        line_width = 6
+    
+        # Plot Moran's I and Geary's C with annotations
+        fig, ax1 = plt.subplots(figsize=(12, 8))
+    
+        # Moran's I settings
+        color_moran = 'tab:blue'
+        ax1.set_xlabel("Time Step", fontsize=label_font_size)
+        ax1.set_ylabel("Moran's I", color=color_moran, fontsize=label_font_size)
+        ax1.plot(self.time_steps, moran_values, marker='o', color=color_moran, label="Moran's I", linewidth = line_width, markersize=18)
+        ax1.tick_params(axis='y', labelcolor=color_moran, labelsize=tick_font_size, width=4, length=8)
+        ax1.tick_params(axis='x', labelsize=tick_font_size, width=4, length=8)
+        # ax1.axhline(y=0, color='red', linestyle='--', label="Moran's I = 0")
+        ax1.set_ylim(-1.1, 1.1)
+        for spine in ax1.spines.values():
+            spine.set_linewidth(4)
+    
+        # # Annotate Moran's I values
+        # for i, mi_val in enumerate(moran_values):
+        #     ax1.annotate(f'{mi_val:.3f}', (self.time_steps[i], mi_val), textcoords="offset points", 
+        #                  xytext=(0, 10), ha='center', fontsize=annotation_font_size)
+    
+        # Geary's C settings
+        color_geary = 'tab:red'
+        ax2 = ax1.twinx()
+        ax2.set_ylabel("Geary's C", color=color_geary, fontsize=label_font_size)
+        ax2.plot(self.time_steps, geary_values, linestyle='--', marker='s', color=color_geary, label="Geary's C", linewidth = line_width, markersize=18)
+        ax2.tick_params(axis='y', labelcolor=color_geary, labelsize=tick_font_size, width=4, length=8)
+        # ax2.axhline(y=1, color='blue', linestyle='--', label="Geary's C = 1")
+        ax2.set_ylim(-0.1, 2.1)
+        for spine in ax2.spines.values():
+            spine.set_linewidth(4)
+    
+        # # Annotate Geary's C values
+        # for i, gc_val in enumerate(geary_values):
+        #     ax2.annotate(f'{gc_val:.3f}', (self.time_steps[i], gc_val), textcoords="offset points", 
+        #                  xytext=(0, 10), ha='center', fontsize=annotation_font_size)
+    
+        # Add legends and title
+        fig.tight_layout()  # Adjust layout to prevent overlap
+        # fig.suptitle("Moran's I and Geary's C over Time Steps", y=1.02, fontsize=title_font_size)
         plt.show()
         
-        plt.figure()
-        drainage_plot(mg1, 'drainage_area')
-
-matrices = mg1_snapshots  # Add more matrices as needed
-
-# Define time steps
-time_steps = [4500, 5000, 5500, 6000]
-
-#%% Test
-# Example setup for the class
-grid = mg1  # Replace with your RasterModelGrid object
-matrices = matrices  # Example matrices, replace with your actual data
-k = None  # or some integer value
-pixel = None
-pixel_stream = None
-pixel_hillslope = None
-stream_threshold = 4
-slope_threshold = 0.1
-filter_size = 2
-buffer_scaling_factor = 0.03
-minimum_buffer_size = 0.05
-
-# Create an instance of Shannon_Entropy
-entropy_calculator = Shannon_Entropy(
-    grid=grid,
-    matrices=matrices,
-    k=k,
-    pixel=pixel,
-    pixel_stream=pixel_stream,
-    pixel_hillslope=pixel_hillslope,
-    stream_threshold=stream_threshold,
-    slope_threshold=slope_threshold,
-    filter_size=filter_size,
-    buffer_scaling_factor=buffer_scaling_factor,
-    minimum_buffer_size=minimum_buffer_size
-)
-
-# Call the method
-entropy_matrix, probabilities = entropy_calculator.calculate_shannon_entropy(k=k)
-entropies = entropy_calculator.pixel_entropy_across_experiments()
-tot_stream_mask = entropy_calculator.differentiate_hillslopes_and_streams()
-buffered_stream_mask = entropy_calculator.differentiate_hillslopes_and_streams_buffer()
-buffered_stream_mask_scaled = entropy_calculator.differentiate_hillslopes_and_streams_scaled_buffer()
-mskd_ent_matrix_stream, mskd_ent_matrix_hillslope, _, _ = entropy_calculator.calculate_shannon_entropy_mask(stream_mask = tot_stream_mask)
-entropies_stream_array, entropies_hillslope_array = entropy_calculator.pixel_entropy_across_experiments_mask(mask = tot_stream_mask)
-  
-
-# Create an instance of Spatial_Autocorrelation 
-spatial_autocorr_calculator = Spatial_Autocorrelation(
-    grid=grid,
-    matrices=matrices,    
-    time_steps=time_steps
-)
-
-# Call the method    
-spatial_autocorr_calculator.plot_morans_i_over_time()
-spatial_autocorr_calculator.plot_gearys_c_over_time()
-    
-    
-    
-    
-    
-    
+        return moran_values, geary_values, moran_p_values, geary_p_values
     
     
     
